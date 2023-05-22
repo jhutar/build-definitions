@@ -15,7 +15,7 @@ spec:
   - description: Configures project packages that will have their dependencies prefetched.
     name: input
   steps:
-  - image: quay.io/redhat-appstudio/cachi2@sha256:72dcbc303774b0e5708cc43359fb79bc4479319fdcb0fcd40350592087b3ebe7
+  - image: quay.io/redhat-appstudio/cachi2@sha256:ad6a082d7b4ac717237b6f89cb3d74188ebebd06b2086daf2d3a08eaa0f7fac0
     name: prefetch-dependencies
     env:
     - name: INPUT
