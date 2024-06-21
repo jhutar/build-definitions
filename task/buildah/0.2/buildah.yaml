@@ -178,6 +178,8 @@ spec:
     args:
       - $(params.BUILD_ARGS[*])
     script: |
+      echo "[$( date --utc -Ins )] Start"
+      echo "[$( date --utc -Ins )] Updating CA trust"
       ca_bundle=/mnt/trusted-ca/ca-bundle.crt
       if [ -f "$ca_bundle" ]; then
         echo "INFO: Using mounted CA bundle: $ca_bundle"
@@ -185,6 +187,7 @@ spec:
         update-ca-trust
       fi
 
+      echo "[$( date --utc -Ins )] Preparing Dockerfile"
       SOURCE_CODE_DIR=source
       if [ -e "$SOURCE_CODE_DIR/$CONTEXT/$DOCKERFILE" ]; then
         dockerfile_path="$(pwd)/$SOURCE_CODE_DIR/$CONTEXT/$DOCKERFILE"
@@ -211,6 +214,8 @@ spec:
         sed -i -e "s|^\s*RUN \(\(./\)\?mvn\)\(.*\)|RUN echo \"<settings><mirrors><mirror><id>mirror.default</id><url>http://$JVM_BUILD_WORKSPACE_ARTIFACT_CACHE_PORT_80_TCP_ADDR/v1/cache/default/0/</url><mirrorOf>*</mirrorOf></mirror></mirrors></settings>\" > /tmp/settings.yaml; \1 -s /tmp/settings.yaml \3|g" "$dockerfile_path"
         touch /var/lib/containers/java
       fi
+
+      echo "[$( date --utc -Ins )] Fixing system config"
 
       # Fixing group permission on /var/lib/containers
       chown root:root /var/lib/containers
@@ -258,6 +263,7 @@ spec:
         BUILDAH_ARGS+=("--skip-unused-stages=false")
       fi
 
+      echo "[$( date --utc -Ins )] Checking prefetched"
       if [ -f "$(workspaces.source.path)/cachi2/cachi2.env" ]; then
         cp -r "$(workspaces.source.path)/cachi2" /tmp/
         chmod -R go+rwX /tmp/cachi2
@@ -278,12 +284,14 @@ spec:
         fi
       fi
 
+      echo "[$( date --utc -Ins )] Copy repofiles"
       # if yum repofiles stored in git, copy them to mount point outside the source dir
       if [ -d "${SOURCE_CODE_DIR}/${YUM_REPOS_D_SRC}" ]; then
         mkdir -p ${YUM_REPOS_D_FETCHED}
         cp -r ${SOURCE_CODE_DIR}/${YUM_REPOS_D_SRC}/* ${YUM_REPOS_D_FETCHED}
       fi
 
+      echo "[$( date --utc -Ins )] Mounting additional repos"
       # if anything in the repofiles mount point (either fetched or from git), mount it
       if [ -d "${YUM_REPOS_D_FETCHED}" ]; then
         chmod -R go+rwX ${YUM_REPOS_D_FETCHED}
@@ -302,6 +310,7 @@ spec:
       ACTIVATION_KEY_PATH="/activation-key"
       ENTITLEMENT_PATH="/entitlement"
 
+      echo "[$( date --utc -Ins )] Entitlements thingy"
       # do not enable activation key and entitlement at same time. If both vars are provided, prefer activation key.
       # when activation keys are used, an empty directory on shared emptydir volume to /etc/pki/entitlement to prevent certificates from being included in the produced container.
 
@@ -316,6 +325,7 @@ spec:
         echo "Adding the entitlement to the build"
       fi
 
+      echo "[$( date --utc -Ins )] Additional secrets"
       ADDITIONAL_SECRET_PATH="/additional-secret"
       ADDITIONAL_SECRET_TMP="/tmp/additional-secret"
       if [ -d "$ADDITIONAL_SECRET_PATH" ]; then
@@ -326,6 +336,7 @@ spec:
         done < <(find $ADDITIONAL_SECRET_TMP -maxdepth 1 -type f -exec basename {} \;)
       fi
 
+      echo "[$( date --utc -Ins )] Running buildah build"
       unshare -Uf $UNSHARE_ARGS --keep-caps -r --map-users 1,1,65536 --map-groups 1,1,65536 -w ${SOURCE_CODE_DIR}/$CONTEXT -- buildah build \
         $VOLUME_MOUNTS \
         "${BUILDAH_ARGS[@]}" \
@@ -333,6 +344,8 @@ spec:
         --tls-verify=$TLSVERIFY --no-cache \
         --ulimit nofile=4096:4096 \
         -f "$dockerfile_path" -t $IMAGE .
+
+      echo "[$( date --utc -Ins )] Adding metadata"
 
       container=$(buildah from --pull-never $IMAGE)
       buildah mount $container | tee /shared/container_path
@@ -352,6 +365,8 @@ spec:
 
       # Needed to generate base images SBOM
       echo "$BASE_IMAGES" > /shared/base_images_from_dockerfile
+
+      echo "[$( date --utc -Ins )] End"
 
     securityContext:
       capabilities:
@@ -377,11 +392,15 @@ spec:
     # (need to set the workdir, see https://github.com/anchore/syft/issues/2465)
     workingDir: $(workspaces.source.path)/source
     script: |
+      echo "[$( date --utc -Ins )] Running syft on the source directory"
       echo "Running syft on the source directory"
       syft dir:$(workspaces.source.path)/source --output cyclonedx-json=$(workspaces.source.path)/sbom-source.json
+      echo "[$( date --utc -Ins )] Deleting links"
       find $(cat /shared/container_path) -xtype l -delete
+      echo "[$( date --utc -Ins )] Running syft on the image filesystem"
       echo "Running syft on the image filesystem"
       syft dir:$(cat /shared/container_path) --output cyclonedx-json=$(workspaces.source.path)/sbom-image.json
+      echo "[$( date --utc -Ins )] End"
     volumeMounts:
     - mountPath: /var/lib/containers
       name: varlibcontainers
@@ -410,6 +429,9 @@ spec:
       #!/bin/python3
       import json
 
+      import datetime
+      print("[" + datetime.datetime.now(datetime.timezone.utc).isoformat() + "] Start")
+
       # load SBOMs
       with open("./sbom-image.json") as f:
         image_sbom = json.load(f)
@@ -435,6 +457,7 @@ spec:
       # write the CycloneDX unified SBOM
       with open("./sbom-cyclonedx.json", "w") as f:
         json.dump(image_sbom, f, indent=4)
+      print("[" + datetime.datetime.now(datetime.timezone.utc).isoformat() + "] End")
     workingDir: $(workspaces.source.path)
     securityContext:
       runAsUser: 0
@@ -442,6 +465,7 @@ spec:
   - name: merge-cachi2-sbom
     image: quay.io/redhat-appstudio/cachi2:0.9.1@sha256:df67f9e063b544a8c49a271359377fed560562615e0278f6d0b9a3485f3f8fad
     script: |
+      echo "[$( date --utc -Ins )] Start"
       if [ -f "sbom-cachi2.json" ]; then
         echo "Merging contents of sbom-cachi2.json into sbom-cyclonedx.json"
         merge_syft_sbom sbom-cachi2.json sbom-cyclonedx.json > sbom-temp.json
@@ -449,6 +473,7 @@ spec:
       else
         echo "Skipping step since no Cachi2 SBOM was produced"
       fi
+      echo "[$( date --utc -Ins )] End"
     workingDir: $(workspaces.source.path)
     securityContext:
       runAsUser: 0
@@ -459,6 +484,9 @@ spec:
       #!/bin/python3
       import json
 
+      import datetime
+      print("[" + datetime.datetime.now(datetime.timezone.utc).isoformat() + "] Start")
+
       with open("./sbom-cyclonedx.json") as f:
         cyclonedx_sbom = json.load(f)
 
@@ -467,6 +495,7 @@ spec:
 
       with open("sbom-purl.json", "w") as output_file:
         json.dump(purl_content, output_file, indent=4)
+      print("[" + datetime.datetime.now(datetime.timezone.utc).isoformat() + "] End")
     workingDir: $(workspaces.source.path)
     securityContext:
       runAsUser: 0
@@ -474,10 +503,12 @@ spec:
   - name: create-base-images-sbom
     image: quay.io/redhat-appstudio/base-images-sbom-script@sha256:667669e3def018f9dbb8eaf8868887a40bc07842221e9a98f6787edcff021840
     script: |
+      echo "[$( date --utc -Ins )] Start"
       python3 /app/base_images_sbom_script.py \
         --sbom=sbom-cyclonedx.json \
         --base-images-from-dockerfile=/shared/base_images_from_dockerfile \
         --base-images-digests=/shared/base_images_digests
+      echo "[$( date --utc -Ins )] End"
     workingDir: $(workspaces.source.path)
     securityContext:
       runAsUser: 0
@@ -488,10 +519,13 @@ spec:
     script: |
       #!/bin/bash
       set -e
+      echo "[$( date --utc -Ins )] Start"
       base_image_name=$(buildah inspect --format '{{ index .ImageAnnotations "org.opencontainers.image.base.name"}}' $IMAGE | cut -f1 -d'@')
       base_image_digest=$(buildah inspect --format '{{ index .ImageAnnotations "org.opencontainers.image.base.digest"}}' $IMAGE)
       container=$(buildah from --pull-never $IMAGE)
+      echo "[$( date --utc -Ins )] Doing buildah copy"
       buildah copy $container sbom-cyclonedx.json sbom-purl.json /root/buildinfo/content_manifests/
+      echo "[$( date --utc -Ins )] Doing buildah config"
       buildah config -a org.opencontainers.image.base.name=${base_image_name} -a org.opencontainers.image.base.digest=${base_image_digest} $container
 
       BUILDAH_ARGS=()
@@ -499,6 +533,7 @@ spec:
         BUILDAH_ARGS+=("--squash")
       fi
 
+      echo "[$( date --utc -Ins )] Doing buildah commit"
       buildah commit "${BUILDAH_ARGS[@]}" $container $IMAGE
 
       status=-1
@@ -507,7 +542,7 @@ spec:
       for run in $(seq 1 $max_run); do
         status=0
         [ "$run" -gt 1 ] && sleep $sleep_sec
-        echo "Pushing sbom image to registry"
+        echo "[$( date --utc -Ins )] Pushing sbom image to registry, attempt $run"
         buildah push \
           --tls-verify=$TLSVERIFY \
           --digestfile $(workspaces.source.path)/image-digest $IMAGE \
@@ -515,9 +550,11 @@ spec:
       done
       if [ "$status" -ne 0 ]; then
           echo "Failed to push sbom image to registry after ${max_run} tries"
+          echo "[$( date --utc -Ins )] End"
           exit 1
       fi
 
+      echo "[$( date --utc -Ins )] Forming results"
       cat "$(workspaces.source.path)"/image-digest | tee $(results.IMAGE_DIGEST.path)
       echo -n "$IMAGE" | tee $(results.IMAGE_URL.path)
       {
@@ -530,6 +567,7 @@ spec:
       sbom_digest="$(sha256sum sbom-cyclonedx.json | cut -d' ' -f1)"
       # The SBOM_BLOB_URL is created by `cosign attach sbom`.
       echo -n "${sbom_repo}@sha256:${sbom_digest}" | tee "$(results.SBOM_BLOB_URL.path)"
+      echo "[$( date --utc -Ins )] End"
     securityContext:
       runAsUser: 0
       capabilities:
