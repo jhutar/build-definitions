@@ -223,14 +223,14 @@ spec:
       PODMAN_PORT_FORWARD=" -e JVM_BUILD_WORKSPACE_ARTIFACT_CACHE_PORT_80_TCP_ADDR=localhost"
       fi
 
-      rsync -ra $(workspaces.source.path)/ "$SSH_HOST:$BUILD_DIR/workspaces/source/"
-      rsync -ra /shared/ "$SSH_HOST:$BUILD_DIR/volumes/shared/"
-      rsync -ra /entitlement/ "$SSH_HOST:$BUILD_DIR/volumes/etc-pki-entitlement/"
-      rsync -ra /activation-key/ "$SSH_HOST:$BUILD_DIR/volumes/activation-key/"
-      rsync -ra /additional-secret/ "$SSH_HOST:$BUILD_DIR/volumes/additional-secret/"
-      rsync -ra /mnt/trusted-ca/ "$SSH_HOST:$BUILD_DIR/volumes/trusted-ca/"
-      rsync -ra "$HOME/.docker/" "$SSH_HOST:$BUILD_DIR/.docker/"
-      rsync -ra "/tekton/results/" "$SSH_HOST:$BUILD_DIR/tekton-results/"
+      rsync -rlptD $(workspaces.source.path)/ "$SSH_HOST:$BUILD_DIR/workspaces/source/"
+      rsync -rlptD /shared/ "$SSH_HOST:$BUILD_DIR/volumes/shared/"
+      rsync -rlptD /entitlement/ "$SSH_HOST:$BUILD_DIR/volumes/etc-pki-entitlement/"
+      rsync -rlptD /activation-key/ "$SSH_HOST:$BUILD_DIR/volumes/activation-key/"
+      rsync -rlptD /additional-secret/ "$SSH_HOST:$BUILD_DIR/volumes/additional-secret/"
+      rsync -rlptD /mnt/trusted-ca/ "$SSH_HOST:$BUILD_DIR/volumes/trusted-ca/"
+      rsync -rlptD "$HOME/.docker/" "$SSH_HOST:$BUILD_DIR/.docker/"
+      rsync -rlptD "/tekton/results/" "$SSH_HOST:$BUILD_DIR/tekton-results/"
       cat >scripts/script-build.sh <<'REMOTESSHEOF'
       #!/bin/bash
       set -o verbose
@@ -414,7 +414,7 @@ spec:
       buildah push "$IMAGE" oci:rhtap-final-image
       REMOTESSHEOF
       chmod +x scripts/script-build.sh
-      rsync -ra scripts "$SSH_HOST:$BUILD_DIR"
+      rsync -rlptD scripts "$SSH_HOST:$BUILD_DIR"
       ssh $SSH_ARGS "$SSH_HOST" $PORT_FORWARD podman  run $PODMAN_PORT_FORWARD \
        --tmpfs /run/secrets \
        -e BUILDAH_FORMAT="$BUILDAH_FORMAT" \
@@ -447,9 +447,9 @@ spec:
        -v "$BUILD_DIR/tekton-results/:/tekton/results:Z" \
        -v $BUILD_DIR/scripts:/script:Z \
       --user=0  --rm  "$BUILDER_IMAGE" /script/script-build.sh
-      rsync -ra "$SSH_HOST:$BUILD_DIR/workspaces/source/" "$(workspaces.source.path)/"
-      rsync -ra "$SSH_HOST:$BUILD_DIR/volumes/shared/" /shared/
-      rsync -ra "$SSH_HOST:$BUILD_DIR/tekton-results/" "/tekton/results/"
+      rsync -rlptD "$SSH_HOST:$BUILD_DIR/workspaces/source/" "$(workspaces.source.path)/"
+      rsync -rlptD "$SSH_HOST:$BUILD_DIR/volumes/shared/" /shared/
+      rsync -rlptD "$SSH_HOST:$BUILD_DIR/tekton-results/" "/tekton/results/"
       buildah pull oci:rhtap-final-image
       buildah images
       buildah tag localhost/rhtap-final-image "$IMAGE"
